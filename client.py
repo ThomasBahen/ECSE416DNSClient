@@ -3,6 +3,7 @@ import sys
 import random
 import argparse
 import numpy as np
+import multiprocessing
 
 
 class DNS_Client():
@@ -262,6 +263,8 @@ dns_client = DNS_Client()
 
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+s.settimeout(args.t)
+ 
 s.connect((args.server, args.p))
 
 header = dns_client.build_query_header()
@@ -275,7 +278,12 @@ datagram = datagram.tostring()
 #send datagram to DNS_server
 s.sendall(datagram)
 #get response
-data = s.recv(1024)  
+for _ in range(args.r):
+    try:
+        data = s.recv(1024) 
+        break
+    except TimeoutError:
+        pass
     
 
 #load response into numpy array
