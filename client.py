@@ -1,20 +1,20 @@
 import socket 
 import sys
 import random
+import argparse
 import numpy as np
 
 
 class DNS_Client():
     def _init_(self):
-       self.DNS_IP = '132.216.44.21'
-       self.PORT = 53
+   
        self.s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
        
     def connect_DNS(self):
         """
         connects via socket to a DNS Server
         """
-        self.s.connect((self.DNS_IP, self.PORT))
+        self.s.connect((args.server, args.p))
     
     def convert_16bit_array_to_8bit_array(self, array):
         """
@@ -49,7 +49,7 @@ class DNS_Client():
         packet_datagram.append(header_id_part2)
         
         header_id = np.uint16(random.randint(0, 65535))
-        print(packet_datagram)
+     #   print(packet_datagram)
         
         
         #Set first bit QR to 1, for query
@@ -117,7 +117,7 @@ class DNS_Client():
         
         #set the QTYPE. Set to 0x0001 for now, but needs to be variable
        output_arr = np.append(output_arr, 0)     
-       output_arr = np.append(output_arr, 1)    
+       output_arr = np.append(output_arr, args.type)    
         
         #set the QClass. Must always be 0x0001
        output_arr = np.append(output_arr, 0)
@@ -190,13 +190,13 @@ class DNS_Client():
         
         flags = np.uint16((answer[2]<<8) + answer[3])
       
-        QR = answer[2]>>7
+        QR = answer[2]>>8
         
         truncated = answer[2]&1
         
         question_count = np.uint16((answer[4]<<8) + answer[5])
         
-        answer_count = np.uint16((answer[6]<<6) + answer[7])
+        answer_count = np.uint16((answer[6]<<8) + answer[7])
         
         #array describing the question string and up. It is up to decode to know when the question ends and anything else after that begins
         question_array = answer[12:]
@@ -243,23 +243,34 @@ class DNS_Client():
             string_output+=binary
         return string_output
 
+#create parser to fill arguments
+parser = argparse.ArgumentParser()
+
+parser.add_argument("-t", default = 5)
+parser.add_argument("-r", default = 3)
+parser.add_argument("-p", default = 53)
+parser.add_argument("-mx",  action='store_const', dest='type', default=0x01, const=0x0F)
+parser.add_argument("-ns",  action='store_const', dest='type', default=0x01, const=0x02)
+parser.add_argument("server")
+parser.add_argument("domainname")
+args= parser.parse_args()
+
 
 #creates DNS_Client with predetermined  socket port and DNS server IP
 dns_client = DNS_Client()
 #connects to DNS server
-DNS_IP = '74.116.184.28' #'132.216.44.21'
-PORT = 53
+
+
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s.connect((DNS_IP, PORT))
+s.connect((args.server, args.p))
 
 header = dns_client.build_query_header()
 
-name = "www.mcgill.com"
-question = dns_client.build_question(name)
+question = dns_client.build_question(args.domainname)
 datagram = np.append(header, question)
 datagram = datagram.astype('uint8')
 
-datagram = datagram.tobytes()
+datagram = datagram.tostring()
 
 #send datagram to DNS_server
 s.sendall(datagram)
