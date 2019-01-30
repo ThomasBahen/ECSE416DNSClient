@@ -3,7 +3,7 @@ import sys
 import random
 import argparse
 import numpy as np
-import select
+import multiprocessing
 
 
 class DNS_Client():
@@ -89,7 +89,7 @@ class DNS_Client():
         
         return new_header
        
-    def build_question(self, dns_name, query_type):
+    def build_question(self, dns_name):
        """
        Given a DNS name like www.mcgill.ca, and maybe some other features to be added slightly after, 
        returns a numpy uint8 array that represents the question packet of the datagram
@@ -117,9 +117,9 @@ class DNS_Client():
        output_arr = np.append(output_arr, 0)
         
         #set the QTYPE. Set to 0x0001 for now, but needs to be variable
-       output_arr = np.append(output_arr, 0)    
-       
-       output_arr = np.append(output_arr, query_type) 
+       output_arr = np.append(output_arr, 0)     
+       output_arr = np.append(output_arr, args.type)    
+        
         #set the QClass. Must always be 0x0001
        output_arr = np.append(output_arr, 0)
        output_arr = np.append(output_arr, 1)
@@ -161,7 +161,7 @@ class DNS_Client():
         current_value = name_array[0]; #update current value. When reach current_value = 00, then end. 
         string_arr = ''
         outer_counter=1
-        while(current_value != 0 and current_value != 192):
+        while(current_value != 0):
             counter = 0
             next_step = current_value
             while(counter < next_step):
@@ -177,7 +177,7 @@ class DNS_Client():
             
         
         
-    def decode_answer(self, answer, header):
+    def decode_answer(self, answer):
         """
         Decodes answer given by DNS server. 
             Input: 
@@ -189,101 +189,50 @@ class DNS_Client():
         
         header_id = np.uint16((answer[0]<<8) + answer[1])
         
-        header_check = np.uint16((header[0]<<8) + header[1])
-        if (header_id != header_check):
-            print("WRONG PACKET ERROR: response ID does not match query ID")
-            return 10, 10
-        
         flags = np.uint16((answer[2]<<8) + answer[3])
       
-        qR = np.uint8(answer[2]>>7)
+        QR = answer[2]>>8
         
-        opCode = np.uint8((answer[2]>>3)&15)
-        
-        truncated = np.uint8(answer[2]&1)
-        
-        isAuthority = np.uint((answer[2]<<2)&1)
-        if(isAuthority ==1):
-            print("This server is an authoritative server\n")
-            
-        
-        rCode = np.uint8(answer[3]&15)
-        if(rCode == 0):
-            pass# print("no error occurred")
-        elif(rCode == 1):
-            print("Format Error: The name server was unable to interpret the query due to it's format")
-            return 10, 10
-        elif(rCode == 2):
-            print("Server Error: The DNS was unable to process the query due to an error on the server's side")
-            return 10, 10
-        elif(rCode == 3):
-            print("NOTFOUND: Domain name referenced in query does not exist")
-            return 10, 10
-        elif(rCode == 4):
-            print("Not Implemented Error: The DNS does not support the requested type of query")  
-            return 10, 10
-        elif(rCode == 5):
-            print("RESTRICTION ERROR: The DNS refuses to perform the requested operation for policy reasons")
-            return 10, 10
-            
-            
-        
+        truncated = answer[2]&1
         
         question_count = np.uint16((answer[4]<<8) + answer[5])
         
         answer_count = np.uint16((answer[6]<<8) + answer[7])
         
         #array describing the question string and up. It is up to decode to know when the question ends and anything else after that begins
-      #  question_array = answer[12:]
+        question_array = answer[12:]
         #decode question must both decode the string of words given by the dns server, but alsoreturn the last index of the question
-        #question, question_end_index = self.decode_question(question_array);
+        question, question_end_index = self.decode_question(question_array);
         
-        #answer_start_index = 12 + question_end_index + 1
-        #pointer_to_start_of_name = answer[answer_start_index + 1] #index at which the name of the string starts.
-        #answer_name = answer[pointer_to_start_of_name:]
+        answer_start_index = 12 + question_end_index + 1
+        pointer_to_start_of_name = answer[answer_start_index + 1] #index at which the name of the string starts.
+        answer_name = answer[pointer_to_start_of_name:]
         #decode_name must return the decoded name and the end index, like decode_question
-        answer_name = answer[12:]
-        answer_name, answer_start_index = self.decode_name(answer_name)
+        answer_name, answer_name_end_index = self.decode_name(answer_name)
         
-        answer_start_index = 12+answer_start_index+1
         #must be either:
         #x0005 - CNAME
         #x000f - type MX query
         #x0002 - type NS query
         #x0001 type-A query
-        question_type = np.uint16((answer[answer_start_index ]<<8) + answer[answer_start_index + 1])
+        response_type = np.uint16((answer[answer_start_index + 2]<<8) + answer[answer_start_index + 3])
         
-    
         
-      
-        
-        offset = np.uint8(answer[answer_start_index+5])
-        
-        response_type = np.uint16((answer[answer_start_index + 6]<<8) + answer[answer_start_index + 7])
-        
-         #check class is 0x0001
-        if(np.uint16((answer[answer_start_index + 8]<<8 )+ answer[answer_start_index + 9] )!= 1):
+        #check class is 0x0001
+        if(np.uint16((answer[answer_start_index + 4]<<8 )+ answer[answer_start_index + 5] )!= 1):
             print("Error: DNS QCode  in answer packet specifies this packet does not have to do with internet addresses")
-            
-        time_out = np.uint32((answer[answer_start_index + 10]<<24) + (answer[answer_start_index + 11]<<16) + (answer[answer_start_index + 12]<<8) + answer[answer_start_index + 13])
-       
-        rDLENGTH = np.uint16((answer[answer_start_index + 14]<<8) + answer[answer_start_index+15])
         
-        if (response_type ==1):
-            for i in range(rDLENGTH):
-                answer_output += (str(answer[answer_start_index + 16 + i]) + '.')
-            answer_output = answer_output[:-1]
-        elif (response_type == 15):
-            preference = np.uint16((answer[answer_start_index + 16]<<8) + answer[answer_start_index+17])
-            answer_output, end_index = self.decode_name(answer[answer_start_index +18:])
-        elif (response_type ==2 or response_type==5):
-            answer_output, end_index = self.decode_name(answer[answer_start_index +16:])
-            if(response_type ==5):
-                print("this is the name of an alias to :   " + answer_output )
-                
+        time_out = np.uint32((answer[answer_start_index + 6]<<24) + (answer[answer_start_index + 7]<<16) + (answer[answer_start_index + 8]<<8) + answer[answer_start_index + 9])
+        
+        rDLENGTH = np.uint16((answer[answer_start_index + 10]<<8) + answer[answer_start_index+11])
+        
+        for i in range(rDLENGTH):
+            answer_output += (str(answer[answer_start_index + 12 + i]) + '.')
+        answer_output = answer_output[:-1]
+     
             
         
-        return answer_output, response_type
+        return answer_output
         
     def convert_nparray_bytesarray(array):
         """
@@ -295,16 +244,10 @@ class DNS_Client():
             string_output+=binary
         return string_output
 
-def remove_www(name):
-    if (name[:4] == 'www.'):
-        name = name[4:]
-        
-    return name
-
 #create parser to fill arguments
 parser = argparse.ArgumentParser()
 
-parser.add_argument("-t", default = .5)
+parser.add_argument("-t", default = 5)
 parser.add_argument("-r", default = 3)
 parser.add_argument("-p", default = 53)
 parser.add_argument("-mx",  action='store_const', dest='type', default=0x01, const=0x0F)
@@ -320,57 +263,33 @@ dns_client = DNS_Client()
 
 
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-s.setblocking(0)
 s.settimeout(args.t)
  
 s.connect((args.server, args.p))
+
+header = dns_client.build_query_header()
+
+question = dns_client.build_question(args.domainname)
+datagram = np.append(header, question)
+datagram = datagram.astype('uint8')
+
+datagram = datagram.tostring()
+
+#send datagram to DNS_server
+s.sendall(datagram)
 #get response
-for tries in range(args.r):
-    header = dns_client.build_query_header()
-    
-    question = dns_client.build_question(args.domainname, args.type)
-    datagram = np.append(header, question)
-    datagram = datagram.astype('uint8')
-    
-    datagram = datagram.tostring()
-    
-    #send datagram to DNS_server
-    s.sendall(datagram)
-    
-    timed_out = False
-    ready = select.select([s], [], [], args.t)
-    response_type = 10
-    IP_address = 0
-    if ready[0]:
-        data = s.recv(4096)
-         #load response into numpy array
-        response= np.frombuffer(data, dtype=np.uint8)
-
-        IP_address, response_type = dns_client.decode_answer(response, header)
-    else:
-        timed_out
-        print("Packet timed out... trying again ")
-
-    
-   
-    
-    if (response_type != 10 and not timed_out): #response type 10 indicates if an error has occured
-       if response_type != 5:
-           if(response_type ==1):
-               print("IP address of requested domain: " + IP_address)
-           elif(response_type ==2):
-               print("Name Server responsible for domain: " + IP_address)
-           elif(response_type ==15):
-               print("Mail exchanged of requested domain: " + IP_address)
-       break
-    elif (tries >= args.r):
-       print("ERROR: exceeded the number of tries. Maybe another time")
-       break
-        
+for _ in range(args.r):
+    try:
+        data = s.recv(1024) 
+        break
+    except TimeoutError:
+        pass
     
 
+#load response into numpy array
+response= np.frombuffer(data, dtype=np.uint8)
 
+IP_address = dns_client.decode_answer(response)
 
-
-        
+print("IP address of requested website: " + IP_address)
     
