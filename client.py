@@ -193,7 +193,7 @@ class DNS_Client():
         header_check = np.uint16((header[0]<<8) + header[1])
         if (header_id != header_check):
             print("WRONG PACKET ERROR: response ID does not match query ID")
-            return 10, 10
+            return 10, 10, 0, 0, 0, 0
         
         flags = np.uint16((answer[2]<<8) + answer[3])
       
@@ -204,8 +204,8 @@ class DNS_Client():
         truncated = np.uint8(answer[2]&1)
         
         isAuthority = np.uint((answer[2]<<2)&1)
-        if(isAuthority ==1):
-            print("This server is an authoritative server\n")
+       # if(isAuthority ==1):
+          #  print("This server is an authoritative server\n")
             
         
         rCode = np.uint8(answer[3]&15)
@@ -213,19 +213,19 @@ class DNS_Client():
             pass# print("no error occurred")
         elif(rCode == 1):
             sys.exit("Format Error: The name server was unable to interpret the query due to it's format")
-            return 10, 10
+            return 10, 10, 0, 0, 0, 0
         elif(rCode == 2):
             sys.exit("Server Error: The DNS was unable to process the query due to an error on the server's side")
-            return 10, 10
+            return 10, 10, 0, 0, 0, 0
         elif(rCode == 3):
             sys.exit("NOTFOUND: Domain name referenced in query does not exist")
-            return 10, 10
+            return 10, 10, 0, 0, 0, 0
         elif(rCode == 4):
             sys.exit("Not Implemented Error: The DNS does not support the requested type of query")  
-            return 10, 10
+            return 10, 10, 0, 0, 0, 0
         elif(rCode == 5):
             sys.exit("RESTRICTION ERROR: The DNS refuses to perform the requested operation for policy reasons")
-            return 10, 10
+            return 10, 10, 0, 0, 0, 0
             
             
         
@@ -266,10 +266,11 @@ class DNS_Client():
         if(np.uint16((answer[answer_start_index + 8]<<8 )+ answer[answer_start_index + 9] )!= 1):
             print("Error: DNS QCode  in answer packet specifies this packet does not have to do with internet addresses")
             
-        time_out = np.uint32((answer[answer_start_index + 10]<<24) + (answer[answer_start_index + 11]<<16) + (answer[answer_start_index + 12]<<8) + answer[answer_start_index + 13])
+        can_cache = np.uint32((answer[answer_start_index + 10]<<24) + (answer[answer_start_index + 11]<<16) + (answer[answer_start_index + 12]<<8) + answer[answer_start_index + 13])
        
         rDLENGTH = np.uint16((answer[answer_start_index + 14]<<8) + answer[answer_start_index+15])
         
+        preference = 0
         if (response_type ==1):
             for i in range(rDLENGTH):
                 answer_output += (str(answer[answer_start_index + 16 + i]) + '.')
@@ -279,12 +280,12 @@ class DNS_Client():
             answer_output, end_index = self.decode_name(answer[answer_start_index +18:])
         elif (response_type ==2 or response_type==5):
             answer_output, end_index = self.decode_name(answer[answer_start_index +16:])
-            if(response_type ==5):
-                print("this is the name of an alias to :   " + answer_output )
+           # if(response_type ==5):
+               # print("this is the name of an alias to :   " + answer_output )
                 
             
         
-        return answer_output, response_type
+        return answer_output, response_type, can_cache, answer_count, isAuthority, preference
         
     def convert_nparray_bytesarray(array):
         """
@@ -353,12 +354,12 @@ for tries in range(args.r):
     if ready[0]:
         end = time.time()
         totalTime = (end-start)
-        print('Response received after '+'%.4f' % totalTime+' seconds '+str(tries)+' retires')
+        print('Response received after '+'%.4f' % totalTime+' seconds '+str(tries)+' retries')
         data = s.recv(4096)
          #load response into numpy array
         response= np.frombuffer(data, dtype=np.uint8)
 
-        IP_address, response_type = dns_client.decode_answer(response, header)
+        name, response_type, can_cache, answer_count, authority, preference = dns_client.decode_answer(response, header)
     else:
         timed_out
         print("Packet timed out... trying again ")
@@ -367,14 +368,17 @@ for tries in range(args.r):
    
     
     if (response_type != 10 and not timed_out): #response type 10 indicates if an error has occured
-       if response_type != 5:
+        print("Answer Section (" + str(answer_count) + " records)")
+        if response_type != 5:
            if(response_type ==1):
-               print("IP address of requested domain: " + IP_address)
+               print("IP\t" + str(name) + "\t " + str(can_cache) + "\t" + str(authority))
            elif(response_type ==2):
-               print("Name Server responsible for domain: " + IP_address)
+                print("NS\t" + str(name) + "\t " + str(can_cache) + "\t" +  str(authority))
            elif(response_type ==15):
-               print("Mail exchanged of requested domain: " + IP_address)
-       break
+                print("MX\t" + str(name) + "\t " + str(preference) + "\t " + str(can_cache)+ "\t" +  str(authority))
+        else:
+             print("CNAME\t" + str(name) + "\t " + str(can_cache) + "\t" +  str(authority))
+        break
     elif (tries >= args.r):
        print("ERROR: exceeded the number of tries. Maybe another time")
        break
