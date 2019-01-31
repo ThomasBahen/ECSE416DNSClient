@@ -4,6 +4,7 @@ import random
 import argparse
 import numpy as np
 import select
+import time
 
 
 class DNS_Client():
@@ -211,19 +212,19 @@ class DNS_Client():
         if(rCode == 0):
             pass# print("no error occurred")
         elif(rCode == 1):
-            print("Format Error: The name server was unable to interpret the query due to it's format")
+            sys.exit("Format Error: The name server was unable to interpret the query due to it's format")
             return 10, 10
         elif(rCode == 2):
-            print("Server Error: The DNS was unable to process the query due to an error on the server's side")
+            sys.exit("Server Error: The DNS was unable to process the query due to an error on the server's side")
             return 10, 10
         elif(rCode == 3):
-            print("NOTFOUND: Domain name referenced in query does not exist")
+            sys.exit("NOTFOUND: Domain name referenced in query does not exist")
             return 10, 10
         elif(rCode == 4):
-            print("Not Implemented Error: The DNS does not support the requested type of query")  
+            sys.exit("Not Implemented Error: The DNS does not support the requested type of query")  
             return 10, 10
         elif(rCode == 5):
-            print("RESTRICTION ERROR: The DNS refuses to perform the requested operation for policy reasons")
+            sys.exit("RESTRICTION ERROR: The DNS refuses to perform the requested operation for policy reasons")
             return 10, 10
             
             
@@ -304,8 +305,8 @@ def remove_www(name):
 #create parser to fill arguments
 parser = argparse.ArgumentParser()
 
-parser.add_argument("-t", default = .5)
-parser.add_argument("-r", default = 3)
+parser.add_argument("-t", type=float, default = .5)
+parser.add_argument("-r", type=int, default = 3)
 parser.add_argument("-p", default = 53)
 parser.add_argument("-mx",  action='store_const', dest='type', default=0x01, const=0x0F)
 parser.add_argument("-ns",  action='store_const', dest='type', default=0x01, const=0x02)
@@ -324,10 +325,19 @@ s.setblocking(0)
 s.settimeout(args.t)
  
 s.connect((args.server, args.p))
+
+print('DnsClient sending request for: '+ args.domainname)
+print('Server: '+ args.server)
+if(args.type==1):
+    print('Request Type: A')
+elif(args.type==2):
+     print('Request Type: NS')
+elif(args.type==15):
+     print('Request Type: MX')
 #get response
+start = time.time()
 for tries in range(args.r):
     header = dns_client.build_query_header()
-    
     question = dns_client.build_question(args.domainname, args.type)
     datagram = np.append(header, question)
     datagram = datagram.astype('uint8')
@@ -336,12 +346,14 @@ for tries in range(args.r):
     
     #send datagram to DNS_server
     s.sendall(datagram)
-    
     timed_out = False
     ready = select.select([s], [], [], args.t)
     response_type = 10
     IP_address = 0
     if ready[0]:
+        end = time.time()
+        totalTime = (end-start)
+        print('Response received after '+'%.4f' % totalTime+' seconds '+str(tries)+' retires')
         data = s.recv(4096)
          #load response into numpy array
         response= np.frombuffer(data, dtype=np.uint8)
