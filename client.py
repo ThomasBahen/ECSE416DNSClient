@@ -150,7 +150,7 @@ class DNS_Client():
             
         
         
-    def decode_name(self, name_array):
+    def decode_name(self, name_array, **kwargs):
         """
         Given an array that starts at the first entry of the name section, goes through the name, decodes it from ascii code to appropriate char, and returns the name and the final index at which the name ended (with 00) 
         Input:
@@ -158,7 +158,9 @@ class DNS_Client():
         Output:
             Decoded name, and final index
         """
-       
+        response_type = 0
+        if 'response_type' in kwargs:
+            response_type = kwargs['response_type']
         current_value = name_array[0]; #update current value. When reach current_value = 00, then end. 
         string_arr = ''
         outer_counter=1
@@ -174,7 +176,14 @@ class DNS_Client():
             current_value = name_array[outer_counter]
             outer_counter+=1
         string_arr = string_arr[:-1]
-        return string_arr, outer_counter-1
+        if(response_type ==5):
+            if current_value==0:
+               output=outer_counter-2
+            else:
+               output=outer_counter-1
+        else:
+            output=outer_counter-1
+        return string_arr, output
             
         
         
@@ -247,11 +256,13 @@ class DNS_Client():
         answer_name, answer_start_index = self.decode_name(answer_name)
         
         answer_start_index = 12+answer_start_index+1
+        header_question = answer[:answer_start_index+4]
         #must be either:
         #x0005 - CNAME
         #x000f - type MX query
         #x0002 - type NS query
         #x0001 type-A query
+        
         question_type = np.uint16((answer[answer_start_index ]<<8) + answer[answer_start_index + 1])
         
     
@@ -271,21 +282,28 @@ class DNS_Client():
         rDLENGTH = np.uint16((answer[answer_start_index + 14]<<8) + answer[answer_start_index+15])
         
         preference = 0
+        final_index = 0
         if (response_type ==1):
             for i in range(rDLENGTH):
                 answer_output += (str(answer[answer_start_index + 16 + i]) + '.')
             answer_output = answer_output[:-1]
+            final_index = answer_start_index + 16 + i + 1
         elif (response_type == 15):
             preference = np.uint16((answer[answer_start_index + 16]<<8) + answer[answer_start_index+17])
             answer_output, end_index = self.decode_name(answer[answer_start_index +18:])
-        elif (response_type ==2 or response_type==5):
+            final_index = answer_start_index + 18 + end_index +1
+        elif (response_type ==2):
             answer_output, end_index = self.decode_name(answer[answer_start_index +16:])
+            final_index =  answer_start_index+16 + end_index + 2
            # if(response_type ==5):
                # print("this is the name of an alias to :   " + answer_output )
-                
+        elif( response_type==5):
+            answer_output, end_index = self.decode_name(answer[answer_start_index +16:], response_type=response_type)
+            final_index =  answer_start_index+16 + end_index + 2
+            
             
         
-        return answer_output, response_type, can_cache, answer_count, isAuthority, preference
+        return answer_output, response_type, can_cache, answer_count, isAuthority, preference, header_question, final_index 
         
     def convert_nparray_bytesarray(array):
         """
@@ -311,8 +329,8 @@ parser.add_argument("-r", type=int, default = 3)
 parser.add_argument("-p", default = 53)
 parser.add_argument("-mx",  action='store_const', dest='type', default=0x01, const=0x0F)
 parser.add_argument("-ns",  action='store_const', dest='type', default=0x01, const=0x02)
-parser.add_argument("server")
-parser.add_argument("domainname")
+parser.add_argument("server", action='store_const', const='8.8.8.8')
+parser.add_argument("domainname", action='store_const', const='www.apple.ca')
 args= parser.parse_args()
 
 
@@ -358,8 +376,35 @@ for tries in range(args.r):
         data = s.recv(4096)
          #load response into numpy array
         response= np.frombuffer(data, dtype=np.uint8)
-
-        name, response_type, can_cache, answer_count, authority, preference = dns_client.decode_answer(response, header)
+        
+       # name, response_type, can_cache, answer_count, authority, preference, header_question, final_index = dns_client.decode_answer(response, header)
+        output = dns_client.decode_answer(response, header)
+        name = output[0]
+        response_type = output[1]
+        can_cache = output[2]
+        answer_count = output[3]
+        authority = output[4]
+        preference = output[5]
+        header_question =output[6]
+        final_index = output[7]
+        decoded_values = [name, response_type, can_cache, answer_count, authority, preference]
+        outputs = np.asarray(decoded_values)
+        outputs = np.reshape(outputs, [1, len(outputs)])
+        
+        #outputs = 
+        new_response = response
+        while answer_count > 1:
+            start = header_question# header_question
+            rest = new_response[final_index:] # the rest of the response, not including what we just decoded 
+            new_response = np.append(start, rest)
+            new_output = dns_client.decode_answer(new_response, header)
+            new_outputs = np.asarray(new_output[:-2])
+            header_question = new_output[-2]
+            final_index = new_output[-1]
+            new_outputs = np.reshape(new_outputs, [1, len(new_outputs)])
+            outputs = np.append(outputs, new_outputs, axis=0)
+            answer_count-=1
+            
     else:
         timed_out
         print("Packet timed out... trying again ")
@@ -368,16 +413,26 @@ for tries in range(args.r):
    
     
     if (response_type != 10 and not timed_out): #response type 10 indicates if an error has occured
-        print("Answer Section (" + str(answer_count) + " records)")
-        if response_type != 5:
-           if(response_type ==1):
-               print("IP\t" + str(name) + "\t " + str(can_cache) + "\t" + str(authority))
-           elif(response_type ==2):
-                print("NS\t" + str(name) + "\t " + str(can_cache) + "\t" +  str(authority))
-           elif(response_type ==15):
-                print("MX\t" + str(name) + "\t " + str(preference) + "\t " + str(can_cache)+ "\t" +  str(authority))
-        else:
-             print("CNAME\t" + str(name) + "\t " + str(can_cache) + "\t" +  str(authority))
+        print("Answer Section (" + str(len(outputs)) + " records)")
+        i = 0
+       
+    
+        for item in outputs:
+            name = item[0]
+            can_cache=item[2]
+            authority=item[4]
+            preference=item[5]
+            response_type=int(item[1])
+            if response_type != 5:
+               if(response_type ==1):
+                   print("IP\t" + str(name) + "\t " + str(can_cache) + "\t" + str(authority))
+               elif(response_type ==2):
+                    print("NS\t" + str(name) + "\t " + str(can_cache) + "\t" +  str(authority))
+               elif(response_type ==15):
+                    print("MX\t" + str(name) + "\t " + str(preference) + "\t " + str(can_cache)+ "\t" +  str(authority))
+            else:
+                 print("CNAME\t" + str(name) + "\t " + str(can_cache) + "\t" +  str(authority))
+            answer_count-=1
         break
     elif (tries >= args.r):
        print("ERROR: exceeded the number of tries. Maybe another time")
