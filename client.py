@@ -329,8 +329,8 @@ parser.add_argument("-r", type=int, default = 3)
 parser.add_argument("-p", default = 53)
 parser.add_argument("-mx",  action='store_const', dest='type', default=0x01, const=0x0F)
 parser.add_argument("-ns",  action='store_const', dest='type', default=0x01, const=0x02)
-parser.add_argument("server", action='store_const', const='8.8.8.8')
-parser.add_argument("domainname", action='store_const', const='www.apple.ca')
+parser.add_argument("server")
+parser.add_argument("domainname")
 args= parser.parse_args()
 
 
