@@ -321,6 +321,11 @@ def remove_www(name):
         
     return name
 
+def validate_ip(server):
+    fields = server.split('.')
+    for value in fields:
+        if(value<0 or value>255):
+            sys.exit("ERROR: Invalid IP, cannot connect to this address")
 #create parser to fill arguments
 parser = argparse.ArgumentParser()
 
@@ -338,7 +343,7 @@ args= parser.parse_args()
 dns_client = DNS_Client()
 #connects to DNS server
 
-
+validate_ip(args.server)
 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 s.setblocking(0)
 s.settimeout(args.t)
